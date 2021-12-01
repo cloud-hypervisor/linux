@@ -524,13 +524,14 @@ static int __init smp_cpu_setup(int cpu)
 	if (ops->cpu_init(cpu))
 		return -ENODEV;
 
-	set_cpu_possible(cpu, true);
+//	set_cpu_possible(cpu, true);
 
 	return 0;
 }
 
 static bool bootcpu_valid __initdata;
 static unsigned int cpu_count = 1;
+static unsigned int disabled_cpu_count;
 
 #ifdef CONFIG_ACPI
 static struct acpi_madt_generic_interrupt cpu_madt_gicc[NR_CPUS];
@@ -549,10 +550,17 @@ struct acpi_madt_generic_interrupt *acpi_cpu_get_madt_gicc(int cpu)
 static void __init
 acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 {
+	unsigned int total_cpu_count = disabled_cpu_count + cpu_count;
 	u64 hwid = processor->arm_mpidr;
 
 	if (!(processor->flags & ACPI_MADT_ENABLED)) {
+#ifndef CONFIG_ACPI_HOTPLUG_CPU
 		pr_debug("skipping disabled CPU entry with 0x%llx MPIDR\n", hwid);
+#else
+		cpu_madt_gicc[total_cpu_count] = *processor;
+		set_cpu_possible(total_cpu_count, true);
+		disabled_cpu_count++;
+#endif
 		return;
 	}
 
@@ -561,7 +569,7 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 		return;
 	}
 
-	if (is_mpidr_duplicate(cpu_count, hwid)) {
+	if (is_mpidr_duplicate(total_cpu_count, hwid)) {
 		pr_err("duplicate CPU MPIDR 0x%llx in MADT\n", hwid);
 		return;
 	}
@@ -582,9 +590,9 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 		return;
 
 	/* map the logical cpu id to cpu MPIDR */
-	set_cpu_logical_map(cpu_count, hwid);
+	set_cpu_logical_map(total_cpu_count, hwid);
 
-	cpu_madt_gicc[cpu_count] = *processor;
+	cpu_madt_gicc[total_cpu_count] = *processor;
 
 	/*
 	 * Set-up the ACPI parking protocol cpu entries
@@ -595,7 +603,10 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 	 * initialize the cpu if the parking protocol is
 	 * the only available enable method).
 	 */
-	acpi_set_mailbox_entry(cpu_count, processor);
+	acpi_set_mailbox_entry(total_cpu_count, processor);
+
+	set_cpu_possible(total_cpu_count, true);
+	set_cpu_present(total_cpu_count, true);
 
 	cpu_count++;
 }
@@ -628,6 +639,9 @@ static void __init acpi_parse_and_init_cpus(void)
 	 */
 	acpi_table_parse_madt(ACPI_MADT_TYPE_GENERIC_INTERRUPT,
 				      acpi_parse_gic_cpu_interface, 0);
+
+	pr_debug("possible cpus(%u) present cpus(%u) disabled cpus(%u)\n",
+		 cpu_count+disabled_cpu_count, cpu_count, disabled_cpu_count);
 
 	/*
 	 * In ACPI, SMP and CPU NUMA information is provided in separate
@@ -699,6 +713,9 @@ static void __init of_parse_and_init_cpus(void)
 		set_cpu_logical_map(cpu_count, hwid);
 
 		early_map_cpu_to_node(cpu_count, of_node_to_nid(dn));
+
+		set_cpu_possible(cpu_count, true);
+		set_cpu_present(cpu_count, true);
 next:
 		cpu_count++;
 	}
@@ -783,7 +800,7 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 		if (err)
 			continue;
 
-		set_cpu_present(cpu, true);
+//		set_cpu_present(cpu, true);
 		numa_store_cpu_info(cpu);
 	}
 }
