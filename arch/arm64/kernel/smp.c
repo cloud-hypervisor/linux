@@ -530,6 +530,7 @@ static int __init smp_cpu_setup(int cpu)
 }
 
 static bool bootcpu_valid __initdata;
+static bool cpus_clipped __initdata = false;
 static unsigned int cpu_count = 1;
 static unsigned int disabled_cpu_count;
 
@@ -552,6 +553,11 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 {
 	unsigned int total_cpu_count = disabled_cpu_count + cpu_count;
 	u64 hwid = processor->arm_mpidr;
+
+	if (total_cpu_count > nr_cpu_ids) {
+		cpus_clipped = true;
+		return;
+	}
 
 	if (!(processor->flags & ACPI_MADT_ENABLED)) {
 #ifndef CONFIG_ACPI_HOTPLUG_CPU
@@ -586,8 +592,8 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 		return;
 	}
 
-	if (cpu_count >= NR_CPUS)
-		return;
+//	if (cpu_count >= NR_CPUS)
+//		return;
 
 	/* map the logical cpu id to cpu MPIDR */
 	set_cpu_logical_map(total_cpu_count, hwid);
@@ -706,8 +712,10 @@ static void __init of_parse_and_init_cpus(void)
 			continue;
 		}
 
-		if (cpu_count >= NR_CPUS)
+		if (cpu_count >= NR_CPUS) {
+			cpus_clipped = true;
 			goto next;
+		}
 
 		pr_debug("cpu logical map 0x%llx\n", hwid);
 		set_cpu_logical_map(cpu_count, hwid);
@@ -728,6 +736,7 @@ next:
  */
 void __init smp_init_cpus(void)
 {
+	unsigned int total_cpu_count = disabled_cpu_count + cpu_count;
 	int i;
 
 	if (acpi_disabled)
@@ -735,9 +744,9 @@ void __init smp_init_cpus(void)
 	else
 		acpi_parse_and_init_cpus();
 
-	if (cpu_count > nr_cpu_ids)
+	if (cpus_clipped)
 		pr_warn("Number of cores (%d) exceeds configured maximum of %u - clipping\n",
-			cpu_count, nr_cpu_ids);
+			total_cpu_count, nr_cpu_ids);
 
 	if (!bootcpu_valid) {
 		pr_err("missing boot CPU MPIDR, not enabling secondaries\n");
