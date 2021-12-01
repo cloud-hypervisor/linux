@@ -545,6 +545,86 @@ struct acpi_madt_generic_interrupt *acpi_cpu_get_madt_gicc(int cpu)
 	return &cpu_madt_gicc[cpu];
 }
 
+#ifdef CONFIG_ACPI_HOTPLUG_CPU
+int arch_register_cpu(int num)
+{
+	return 0;
+}
+
+static int set_numa_node_for_cpu(acpi_handle handle, int cpu)
+{
+#ifdef CONFIG_ACPI_NUMA
+	int node_id;
+
+	/* will evaluate _PXM */
+	node_id = acpi_get_node(handle);
+	if (node_id != NUMA_NO_NODE)
+		set_cpu_numa_node(cpu, node_id);
+#endif
+	return 0;
+}
+
+static void unset_numa_node_for_cpu(int cpu)
+{
+#ifdef CONFIG_ACPI_NUMA
+	set_cpu_numa_node(cpu, NUMA_NO_NODE);
+#endif
+}
+
+static int allocate_logical_cpuid(u64 physid)
+{
+	int first_invalid_idx = -1;
+	bool first = true;
+	int i;
+
+	for_each_possible_cpu(i) {
+		/*
+		 * logical cpuid<->hwid association remains persistent once
+		 * established
+		 */
+		if (cpu_logical_map(i) == physid)
+			return i;
+
+		if ((cpu_logical_map(i) == INVALID_HWID) && first) {
+			first_invalid_idx = i;
+			first = false;
+		}
+	}
+
+	return first_invalid_idx;
+}
+
+int acpi_unmap_cpu(int cpu)
+{
+	set_cpu_present(cpu, false);
+	unset_numa_node_for_cpu(cpu);
+
+	return 0;
+}
+
+int acpi_map_cpu(acpi_handle handle, phys_cpuid_t physid, u32 acpi_id,
+		 int *cpuid)
+{
+	int cpu;
+
+	cpu = allocate_logical_cpuid(physid);
+	if (cpu < 0) {
+		pr_warn("Unable to map logical cpuid to physid 0x%llx\n",
+			physid);
+		return -ENOSPC;
+	}
+
+	/* map the logical cpu id to cpu MPIDR */
+	__cpu_logical_map[cpu] = physid;
+	set_numa_node_for_cpu(handle, cpu);
+
+	set_cpu_present(cpu, true);
+	*cpuid = cpu;
+
+	return 0;
+}
+#endif
+
 /*
  * acpi_map_gic_cpu_interface - parse processor MADT entry
  *
