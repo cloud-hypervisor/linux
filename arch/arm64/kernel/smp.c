@@ -518,15 +518,18 @@ static int __init smp_cpu_setup(int cpu)
 	const struct cpu_operations *ops;
 
 	if (init_cpu_ops(cpu))
-		return -ENODEV;
+		goto out;
 
 	ops = get_cpu_ops(cpu);
 	if (ops->cpu_init(cpu))
-		return -ENODEV;
+		goto out;
 
 //	set_cpu_possible(cpu, true);
 
 	return 0;
+out:
+	__cpu_logical_map[cpu] = INVALID_HWID;
+	return -ENODEV;
 }
 
 static bool bootcpu_valid __initdata;
@@ -564,7 +567,8 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 		pr_debug("skipping disabled CPU entry with 0x%llx MPIDR\n", hwid);
 #else
 		cpu_madt_gicc[total_cpu_count] = *processor;
-		set_cpu_possible(total_cpu_count, true);
+		if (!smp_cpu_setup(total_cpu_count))
+			set_cpu_possible(total_cpu_count, true);
 		disabled_cpu_count++;
 #endif
 		return;
@@ -611,9 +615,10 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 	 */
 	acpi_set_mailbox_entry(total_cpu_count, processor);
 
-	set_cpu_possible(total_cpu_count, true);
-	set_cpu_present(total_cpu_count, true);
-
+	if (!smp_cpu_setup(total_cpu_count)) {
+		set_cpu_possible(total_cpu_count, true);
+		set_cpu_present(total_cpu_count, true);
+	}
 	cpu_count++;
 }
 
@@ -721,9 +726,10 @@ static void __init of_parse_and_init_cpus(void)
 		set_cpu_logical_map(cpu_count, hwid);
 
 		early_map_cpu_to_node(cpu_count, of_node_to_nid(dn));
-
-		set_cpu_possible(cpu_count, true);
-		set_cpu_present(cpu_count, true);
+		if (!smp_cpu_setup(cpu_count)) {
+			set_cpu_possible(cpu_count, true);
+			set_cpu_present(cpu_count, true);
+		}
 next:
 		cpu_count++;
 	}
@@ -737,7 +743,6 @@ next:
 void __init smp_init_cpus(void)
 {
 	unsigned int total_cpu_count = disabled_cpu_count + cpu_count;
-	int i;
 
 	if (acpi_disabled)
 		of_parse_and_init_cpus();
@@ -760,12 +765,12 @@ void __init smp_init_cpus(void)
 	 * with entries in cpu_logical_map while initializing the cpus.
 	 * If the cpu set-up fails, invalidate the cpu_logical_map entry.
 	 */
-	for (i = 1; i < nr_cpu_ids; i++) {
+/*	for (i = 1; i < nr_cpu_ids; i++) {
 		if (cpu_logical_map(i) != INVALID_HWID) {
 			if (smp_cpu_setup(i))
 				set_cpu_logical_map(i, INVALID_HWID);
 		}
-	}
+	}*/
 }
 
 void __init smp_prepare_cpus(unsigned int max_cpus)
