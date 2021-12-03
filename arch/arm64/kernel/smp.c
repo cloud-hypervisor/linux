@@ -559,7 +559,10 @@ static int set_numa_node_for_cpu(acpi_handle handle, int cpu)
 	/* will evaluate _PXM */
 	node_id = acpi_get_node(handle);
 	if (node_id != NUMA_NO_NODE)
+	{
+		set_acpicpu_numa_node(cpu, node_id);
 		set_cpu_numa_node(cpu, node_id);
+	}
 #endif
 	return 0;
 }
@@ -567,7 +570,7 @@ static int set_numa_node_for_cpu(acpi_handle handle, int cpu)
 static void unset_numa_node_for_cpu(int cpu)
 {
 #ifdef CONFIG_ACPI_NUMA
-	set_cpu_numa_node(cpu, NUMA_NO_NODE);
+	set_acpicpu_numa_node(cpu, NUMA_NO_NODE);
 #endif
 }
 
