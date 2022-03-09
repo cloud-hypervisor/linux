@@ -100,7 +100,6 @@
 #include <linux/kcsan.h>
 #include <linux/init_syscalls.h>
 #include <linux/stackdepot.h>
-#include <linux/amba/serial.h>
 
 #include <asm/io.h>
 #include <asm/bugs.h>
@@ -1535,10 +1534,6 @@ static int __ref kernel_init(void *unused)
 
 #ifdef CONFIG_X86
 	outb(0x41, 0x80);
-#endif
-
-#ifdef CONFIG_ARM64
-	pl011_debug_trap(DEBUG_TRAP_VAL_END_BOOT);
 #endif
 
 	if (ramdisk_execute_command) {

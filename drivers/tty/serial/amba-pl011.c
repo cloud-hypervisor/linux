@@ -44,8 +44,6 @@
 
 #include "amba-pl011.h"
 
-char __iomem *pl011_debug_addr;
-
 #define UART_NR			14
 
 #define SERIAL_AMBA_MAJOR	204
@@ -2753,9 +2751,6 @@ static int pl011_setup_port(struct device *dev, struct uart_amba_port *uap,
 	base = devm_ioremap_resource(dev, mmiobase);
 	if (IS_ERR(base))
 		return PTR_ERR(base);
-
-	pl011_debug_addr = (char __iomem *)base;
-	pl011_debug_addr += UART011_IO_DEBUG;
 
 	index = pl011_probe_dt_alias(index, dev);
 
