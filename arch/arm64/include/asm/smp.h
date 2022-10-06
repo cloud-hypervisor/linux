@@ -47,6 +47,8 @@ DECLARE_PER_CPU_READ_MOSTLY(int, cpu_number);
  */
 extern u64 __cpu_logical_map[NR_CPUS];
 extern u64 cpu_logical_map(unsigned int cpu);
+extern u64 get_acpicpu_numa_node(unsigned int cpu);
+extern int set_acpicpu_numa_node(unsigned int cpu, unsigned int node);
 
 static inline void set_cpu_logical_map(unsigned int cpu, u64 hwid)
 {

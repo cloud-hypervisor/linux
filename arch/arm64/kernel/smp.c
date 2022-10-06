@@ -518,19 +518,22 @@ static int __init smp_cpu_setup(int cpu)
 	const struct cpu_operations *ops;
 
 	if (init_cpu_ops(cpu))
-		return -ENODEV;
+		goto out;
 
 	ops = get_cpu_ops(cpu);
 	if (ops->cpu_init(cpu))
-		return -ENODEV;
-
-	set_cpu_possible(cpu, true);
+		goto out;
 
 	return 0;
+out:
+	__cpu_logical_map[cpu] = INVALID_HWID;
+	return -ENODEV;
 }
 
 static bool bootcpu_valid __initdata;
+static bool cpus_clipped __initdata;
 static unsigned int cpu_count = 1;
+static unsigned int disabled_cpu_count;
 
 #ifdef CONFIG_ACPI
 static struct acpi_madt_generic_interrupt cpu_madt_gicc[NR_CPUS];
@@ -539,6 +542,88 @@ struct acpi_madt_generic_interrupt *acpi_cpu_get_madt_gicc(int cpu)
 {
 	return &cpu_madt_gicc[cpu];
 }
+
+#ifdef CONFIG_ACPI_HOTPLUG_CPU
+int arch_register_cpu(int num)
+{
+	return 0;
+}
+
+static int set_numa_node_for_cpu(acpi_handle handle, int cpu)
+{
+#ifdef CONFIG_ACPI_NUMA
+	int node_id;
+
+	/* will evaluate _PXM */
+	node_id = acpi_get_node(handle);
+	if (node_id != NUMA_NO_NODE) {
+		set_acpicpu_numa_node(cpu, node_id);
+		set_cpu_numa_node(cpu, node_id);
+	}
+#endif
+	return 0;
+}
+
+static void unset_numa_node_for_cpu(int cpu)
+{
+#ifdef CONFIG_ACPI_NUMA
+	set_acpicpu_numa_node(cpu, NUMA_NO_NODE);
+#endif
+}
+
+static int allocate_logical_cpuid(u64 physid)
+{
+	int first_invalid_idx = -1;
+	bool first = true;
+	int i;
+
+	for_each_possible_cpu(i) {
+		/*
+		 * logical cpuid<->hwid association remains persistent once
+		 * established
+		 */
+		if (cpu_logical_map(i) == physid)
+			return i;
+
+		if ((cpu_logical_map(i) == INVALID_HWID) && first) {
+			first_invalid_idx = i;
+			first = false;
+		}
+	}
+
+	return first_invalid_idx;
+}
+
+int acpi_unmap_cpu(int cpu)
+{
+	set_cpu_present(cpu, false);
+	unset_numa_node_for_cpu(cpu);
+
+	return 0;
+}
+
+int acpi_map_cpu(acpi_handle handle, phys_cpuid_t physid, u32 acpi_id,
+		 int *cpuid)
+{
+	int cpu;
+
+	cpu = allocate_logical_cpuid(physid);
+	if (cpu < 0) {
+		pr_warn("Unable to map logical cpuid to physid 0x%llx\n",
+			physid);
+		return -ENOSPC;
+	}
+
+	/* map the logical cpu id to cpu MPIDR */
+	__cpu_logical_map[cpu] = physid;
+	set_numa_node_for_cpu(handle, cpu);
+
+	set_cpu_present(cpu, true);
+	*cpuid = cpu;
+
+	return 0;
+}
+#endif
 
 /*
  * acpi_map_gic_cpu_interface - parse processor MADT entry
@@ -549,10 +634,23 @@ struct acpi_madt_generic_interrupt *acpi_cpu_get_madt_gicc(int cpu)
 static void __init
 acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 {
+	unsigned int total_cpu_count = disabled_cpu_count + cpu_count;
 	u64 hwid = processor->arm_mpidr;
 
+	if (total_cpu_count > nr_cpu_ids) {
+		cpus_clipped = true;
+		return;
+	}
+
 	if (!(processor->flags & ACPI_MADT_ENABLED)) {
+#ifndef CONFIG_ACPI_HOTPLUG_CPU
 		pr_debug("skipping disabled CPU entry with 0x%llx MPIDR\n", hwid);
+#else
+		cpu_madt_gicc[total_cpu_count] = *processor;
+		if (!smp_cpu_setup(total_cpu_count))
+			set_cpu_possible(total_cpu_count, true);
+		disabled_cpu_count++;
+#endif
 		return;
 	}
 
@@ -561,7 +659,7 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 		return;
 	}
 
-	if (is_mpidr_duplicate(cpu_count, hwid)) {
+	if (is_mpidr_duplicate(total_cpu_count, hwid)) {
 		pr_err("duplicate CPU MPIDR 0x%llx in MADT\n", hwid);
 		return;
 	}
@@ -578,13 +676,10 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 		return;
 	}
 
-	if (cpu_count >= NR_CPUS)
-		return;
-
 	/* map the logical cpu id to cpu MPIDR */
-	set_cpu_logical_map(cpu_count, hwid);
+	set_cpu_logical_map(total_cpu_count, hwid);
 
-	cpu_madt_gicc[cpu_count] = *processor;
+	cpu_madt_gicc[total_cpu_count] = *processor;
 
 	/*
 	 * Set-up the ACPI parking protocol cpu entries
@@ -595,8 +690,12 @@ acpi_map_gic_cpu_interface(struct acpi_madt_generic_interrupt *processor)
 	 * initialize the cpu if the parking protocol is
 	 * the only available enable method).
 	 */
-	acpi_set_mailbox_entry(cpu_count, processor);
+	acpi_set_mailbox_entry(total_cpu_count, processor);
 
+	if (!smp_cpu_setup(total_cpu_count)) {
+		set_cpu_possible(total_cpu_count, true);
+		set_cpu_present(total_cpu_count, true);
+	}
 	cpu_count++;
 }
 
@@ -628,6 +727,9 @@ static void __init acpi_parse_and_init_cpus(void)
 	 */
 	acpi_table_parse_madt(ACPI_MADT_TYPE_GENERIC_INTERRUPT,
 				      acpi_parse_gic_cpu_interface, 0);
+
+	pr_debug("possible cpus(%u) present cpus(%u) disabled cpus(%u)\n",
+		 cpu_count+disabled_cpu_count, cpu_count, disabled_cpu_count);
 
 	/*
 	 * In ACPI, SMP and CPU NUMA information is provided in separate
@@ -692,13 +794,19 @@ static void __init of_parse_and_init_cpus(void)
 			continue;
 		}
 
-		if (cpu_count >= NR_CPUS)
+		if (cpu_count >= cpu_possible()) {
+			cpus_clipped = true;
 			goto next;
+		}
 
 		pr_debug("cpu logical map 0x%llx\n", hwid);
 		set_cpu_logical_map(cpu_count, hwid);
 
 		early_map_cpu_to_node(cpu_count, of_node_to_nid(dn));
+		if (!smp_cpu_setup(cpu_count)) {
+			set_cpu_possible(cpu_count, true);
+			set_cpu_present(cpu_count, true);
+		}
 next:
 		cpu_count++;
 	}
@@ -711,34 +819,20 @@ next:
  */
 void __init smp_init_cpus(void)
 {
-	int i;
+	unsigned int total_cpu_count = disabled_cpu_count + cpu_count;
 
 	if (acpi_disabled)
 		of_parse_and_init_cpus();
 	else
 		acpi_parse_and_init_cpus();
 
-	if (cpu_count > nr_cpu_ids)
+	if (cpus_clipped)
 		pr_warn("Number of cores (%d) exceeds configured maximum of %u - clipping\n",
-			cpu_count, nr_cpu_ids);
+			total_cpu_count, nr_cpu_ids);
 
 	if (!bootcpu_valid) {
 		pr_err("missing boot CPU MPIDR, not enabling secondaries\n");
 		return;
-	}
-
-	/*
-	 * We need to set the cpu_logical_map entries before enabling
-	 * the cpus so that cpu processor description entries (DT cpu nodes
-	 * and ACPI MADT entries) can be retrieved by matching the cpu hwid
-	 * with entries in cpu_logical_map while initializing the cpus.
-	 * If the cpu set-up fails, invalidate the cpu_logical_map entry.
-	 */
-	for (i = 1; i < nr_cpu_ids; i++) {
-		if (cpu_logical_map(i) != INVALID_HWID) {
-			if (smp_cpu_setup(i))
-				set_cpu_logical_map(i, INVALID_HWID);
-		}
 	}
 }
 
@@ -783,7 +877,6 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 		if (err)
 			continue;
 
-		set_cpu_present(cpu, true);
 		numa_store_cpu_info(cpu);
 	}
 }

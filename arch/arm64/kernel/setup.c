@@ -284,6 +284,20 @@ static int __init reserve_memblock_reserved_regions(void)
 }
 arch_initcall(reserve_memblock_reserved_regions);
 
+u64 __acpicpu_node_map[NR_CPUS] = { [0 ... NR_CPUS-1] = NUMA_NO_NODE };
+
+u64 get_acpicpu_numa_node(unsigned int cpu)
+{
+	return __acpicpu_node_map[cpu];
+}
+
+int set_acpicpu_numa_node(unsigned int cpu, unsigned int node)
+{
+	__acpicpu_node_map[cpu] = node;
+
+	return 0;
+}
+
 u64 __cpu_logical_map[NR_CPUS] = { [0 ... NR_CPUS-1] = INVALID_HWID };
 
 u64 cpu_logical_map(unsigned int cpu)
