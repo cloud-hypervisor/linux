@@ -1,0 +1,68 @@
+name: Cloud Hypervisor Linux Release
+on: [create]
+
+jobs:
+  release:
+    if: github.event_name == 'create' && github.event.ref_type == 'tag'
+    name: Release
+    runs-on: ubuntu-22.04
+    steps:
+     - name: Code checkout
+       uses: actions/checkout@v4
+       with:
+        fetch-depth: 1
+     - name: Install build tools
+       run: sudo apt install build-essential flex bison libssl-dev libelf-dev bc gcc-aarch64-linux-gnu
+     - name: Download config (aarch64)
+       run: curl https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-aarch64 -o .config
+     - name: Build (aarch64)
+       run: ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- make Image.gz -j `nproc`
+     - name: Download config (x86-64)
+       run: curl https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-x86_64 -o .config
+     - name: Build kernel (x86-64)
+       run: CFLAGS="-Wa,-mx86-used-note=no" make bzImage -j `nproc`
+     - name: Create release
+       id: create_release
+       uses: actions/create-release@v1
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       with:
+         tag_name: ${{ github.ref }}
+         release_name: ${{ github.ref }}
+         draft: true
+     - name: Upload bzImage for x86_64
+       uses: actions/upload-release-asset@v1
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       with:
+         upload_url: ${{ steps.create_release.outputs.upload_url }}
+         asset_path: arch/x86/boot/bzImage
+         asset_name: bzImage
+         asset_content_type: application/octet-stream
+     - name: Upload vmlinux for x86_64
+       uses: actions/upload-release-asset@v1
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       with:
+         upload_url: ${{ steps.create_release.outputs.upload_url }}
+         asset_path: vmlinux
+         asset_name: vmlinux
+         asset_content_type: application/octet-stream
+     - name: Upload Image.gz for aarch64
+       uses: actions/upload-release-asset@v1
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       with:
+         upload_url: ${{ steps.create_release.outputs.upload_url }}
+         asset_path: arch/arm64/boot/Image.gz
+         asset_name: Image.gz
+         asset_content_type: application/octet-stream
+     - name: Upload Image for aarch64
+       uses: actions/upload-release-asset@v1
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       with:
+         upload_url: ${{ steps.create_release.outputs.upload_url }}
+         asset_path: arch/arm64/boot/Image
+         asset_name: Image
+         asset_content_type: application/octet-stream
