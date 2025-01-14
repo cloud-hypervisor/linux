@@ -13,12 +13,12 @@ jobs:
         fetch-depth: 1
      - name: Install build tools
        run: sudo apt install build-essential flex bison libssl-dev libelf-dev bc gcc-aarch64-linux-gnu
-     - name: Download config (aarch64)
-       run: curl https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-aarch64 -o .config
+     - name: Configure (aarch64)
+       run: ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- make ch_defconfig
      - name: Build (aarch64)
        run: ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- make Image.gz -j `nproc`
-     - name: Download config (x86-64)
-       run: curl https://raw.githubusercontent.com/cloud-hypervisor/cloud-hypervisor/main/resources/linux-config-x86_64 -o .config
+     - name: Configure (x86-64)
+       run: make ch_defconfig
      - name: Build kernel (x86-64)
        run: CFLAGS="-Wa,-mx86-used-note=no" make bzImage -j `nproc`
      - name: Create release
