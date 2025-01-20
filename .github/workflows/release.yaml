@@ -12,11 +12,15 @@ jobs:
        with:
         fetch-depth: 1
      - name: Install build tools
-       run: sudo apt install build-essential flex bison libssl-dev libelf-dev bc gcc-aarch64-linux-gnu
+       run: sudo apt install build-essential flex bison libssl-dev libelf-dev bc gcc-aarch64-linux-gnu gcc-riscv64-linux-gnu
      - name: Configure (aarch64)
        run: ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- make ch_defconfig
      - name: Build (aarch64)
        run: ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- make Image.gz -j `nproc`
+     - name: Configure (riscv64)
+       run: ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- make ch_defconfig
+     - name: Build (riscv64)
+       run: ARCH=riscv CROSS_COMPILE=riscv64-linux-gnu- make Image.gz -j `nproc`
      - name: Configure (x86-64)
        run: make ch_defconfig
      - name: Build kernel (x86-64)
@@ -64,5 +68,23 @@ jobs:
        with:
          upload_url: ${{ steps.create_release.outputs.upload_url }}
          asset_path: arch/arm64/boot/Image
+         asset_name: Image
+         asset_content_type: application/octet-stream
+     - name: Upload Image.gz for riscv64
+       uses: actions/upload-release-asset@v1
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       with:
+         upload_url: ${{ steps.create_release.outputs.upload_url }}
+         asset_path: arch/riscv/boot/Image.gz
+         asset_name: Image.gz
+         asset_content_type: application/octet-stream
+     - name: Upload Image for riscv64
+       uses: actions/upload-release-asset@v1
+       env:
+         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+       with:
+         upload_url: ${{ steps.create_release.outputs.upload_url }}
+         asset_path: arch/riscv/boot/Image
          asset_name: Image
          asset_content_type: application/octet-stream
