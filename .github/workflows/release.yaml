@@ -37,7 +37,7 @@ jobs:
        with:
          upload_url: ${{ steps.create_release.outputs.upload_url }}
          asset_path: arch/x86/boot/bzImage
-         asset_name: bzImage
+         asset_name: bzImage-x86_64
          asset_content_type: application/octet-stream
      - name: Upload vmlinux for x86_64
        uses: actions/upload-release-asset@v1
@@ -46,7 +46,7 @@ jobs:
        with:
          upload_url: ${{ steps.create_release.outputs.upload_url }}
          asset_path: vmlinux
-         asset_name: vmlinux
+         asset_name: vmlinux-x86_64
          asset_content_type: application/octet-stream
      - name: Upload Image.gz for aarch64
        uses: actions/upload-release-asset@v1
@@ -55,7 +55,7 @@ jobs:
        with:
          upload_url: ${{ steps.create_release.outputs.upload_url }}
          asset_path: arch/arm64/boot/Image.gz
-         asset_name: Image.gz
+         asset_name: Image-arm64.gz
          asset_content_type: application/octet-stream
      - name: Upload Image for aarch64
        uses: actions/upload-release-asset@v1
@@ -64,5 +64,5 @@ jobs:
        with:
          upload_url: ${{ steps.create_release.outputs.upload_url }}
          asset_path: arch/arm64/boot/Image
-         asset_name: Image
+         asset_name: Image-arm64
          asset_content_type: application/octet-stream
