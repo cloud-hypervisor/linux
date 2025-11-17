@@ -1356,11 +1356,13 @@ struct task_struct {
 	u8				il_weight;
 	short				pref_node_fork;
 #endif
+#if defined(CONFIG_NUMA_BALANCING) || defined(CONFIG_TOPO_AWARE_SCHEDULING)
+	int				numa_preferred_nid;
+#endif
 #ifdef CONFIG_NUMA_BALANCING
 	int				numa_scan_seq;
 	unsigned int			numa_scan_period;
 	unsigned int			numa_scan_period_max;
-	int				numa_preferred_nid;
 	unsigned long			numa_migrate_retry;
 	/* Migration stamp: */
 	u64				node_stamp;

@@ -213,8 +213,10 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
 	.vtime.starttime = 0,
 	.vtime.state	= VTIME_SYS,
 #endif
-#ifdef CONFIG_NUMA_BALANCING
+#if defined(CONFIG_NUMA_BALANCING) || defined(CONFIG_TOPO_AWARE_SCHEDULING)
 	.numa_preferred_nid = NUMA_NO_NODE,
+#endif
+#ifdef CONFIG_NUMA_BALANCING
 	.numa_group	= NULL,
 	.numa_faults	= NULL,
 #endif
