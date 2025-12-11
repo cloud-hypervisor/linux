@@ -71,6 +71,10 @@
  */
 unsigned int sysctl_sched_tunable_scaling = SCHED_TUNABLESCALING_LOG;
 
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+extern unsigned int sysctl_topo_aware_scheduling;
+#endif
+
 /*
  * Minimal preemption granularity for CPU-bound tasks:
  *
@@ -9296,7 +9300,11 @@ struct lb_env {
 
 	struct rq		*src_rq;
 	int			src_cpu;
-
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	struct sched_group	*src_sg;
+	unsigned long		src_sg_util;
+	unsigned long		src_sg_cap;
+#endif
 	int			dst_cpu;
 	struct rq		*dst_rq;
 
@@ -9446,6 +9454,31 @@ static inline int task_is_ineligible_on_dst_cpu(struct task_struct *p, int dest_
 	return 0;
 }
 
+static int topo_aware_need_migrate_task(struct task_struct *p, struct lb_env *env)
+{
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	int prefer_numa = p->numa_preferred_nid, src_node, dst_node;
+
+	if (!sysctl_topo_aware_scheduling)
+		return 1;
+
+	if (prefer_numa == NUMA_NO_NODE)
+		return 1;
+
+	/* Always allow load balance for sd lower than or equal llc */
+	if (env->sd->flags & SD_SHARE_LLC)
+		return 1;
+
+	/* If move reduce the affinity, check if the current group is overload */
+	dst_node = cpu_to_node(env->dst_cpu);
+	src_node = cpu_to_node(env->src_cpu);
+	if (node_distance(prefer_numa, src_node) < node_distance(prefer_numa, dst_node))
+		if (!is_node_overload(env->src_sg_util, env->src_sg_cap))
+			return 0;
+#endif
+	return 1;
+}
+
 /*
  * can_migrate_task - may task p from runqueue rq be migrated to this_cpu?
  */
@@ -9530,6 +9563,9 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 		schedstat_inc(p->stats.nr_failed_migrations_running);
 		return 0;
 	}
+
+	if (!topo_aware_need_migrate_task(p, env))
+		return 0;
 
 	/*
 	 * Aggressive migration if:
@@ -11500,6 +11536,10 @@ static struct sched_group *sched_balance_find_src_group(struct lb_env *env)
 force_balance:
 	/* Looks like there is an imbalance. Compute it */
 	calculate_imbalance(env, &sds);
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	env->src_sg_util = busiest->group_util;
+	env->src_sg_cap = busiest->group_capacity;
+#endif
 	return env->imbalance ? sds.busiest : NULL;
 
 out_balanced:
@@ -11690,9 +11730,36 @@ imbalanced_active_balance(struct lb_env *env)
 	return 0;
 }
 
+static bool topo_aware_need_active_balance(struct lb_env *env)
+{
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	int prefer_numa, src_node, dst_node;
+
+	if (!sysctl_topo_aware_scheduling)
+		return true;
+
+	if (!env->sd->child || env->sd->child->flags & SD_SHARE_LLC)
+		return true;
+
+	if (cpu_to_node(env->dst_cpu) == env->src_rq->curr->numa_preferred_nid)
+		return true;
+
+	prefer_numa = env->src_rq->curr->numa_preferred_nid;
+	dst_node = cpu_to_node(env->dst_cpu);
+	src_node = cpu_to_node(env->src_cpu);
+	if (node_distance(prefer_numa, src_node) < node_distance(prefer_numa, dst_node))
+		if (!is_node_overload(env->src_sg_util, env->src_sg_cap))
+			return false;
+#endif
+	return true;
+}
+
 static int need_active_balance(struct lb_env *env)
 {
 	struct sched_domain *sd = env->sd;
+
+	if (!topo_aware_need_active_balance(env))
+		return 0;
 
 	if (asym_active_balance(env))
 		return 1;
@@ -11840,6 +11907,11 @@ static int sched_balance_rq(int this_cpu, struct rq *this_rq,
 	struct cpumask *cpus = this_cpu_cpumask_var_ptr(load_balance_mask);
 	struct lb_env env = {
 		.sd		= sd,
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+		.src_sg		= NULL,
+		.src_sg_util	= 0,
+		.src_sg_cap	= 0,
+#endif
 		.dst_cpu	= this_cpu,
 		.dst_rq		= this_rq,
 		.dst_grpmask    = group_balance_mask(sd->groups),
@@ -11874,6 +11946,10 @@ redo:
 		schedstat_inc(sd->lb_nobusyg[idle]);
 		goto out_balanced;
 	}
+
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	env.src_sg = group;
+#endif
 
 	busiest = sched_balance_find_src_rq(&env, group);
 	if (!busiest) {
@@ -12203,6 +12279,9 @@ static int active_load_balance_cpu_stop(void *data)
 	if (likely(sd)) {
 		struct lb_env env = {
 			.sd		= sd,
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+			.src_sg		= NULL,
+#endif
 			.dst_cpu	= target_cpu,
 			.dst_rq		= target_rq,
 			.src_cpu	= busiest_rq->cpu,
@@ -12214,6 +12293,22 @@ static int active_load_balance_cpu_stop(void *data)
 		schedstat_inc(sd->alb_count);
 		update_rq_clock(busiest_rq);
 
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+		struct sched_group *local_sg, *tmp_sg;
+		int i;
+		local_sg = tmp_sg = sd->groups;
+		do {
+			struct cpumask *mask = sched_group_span(tmp_sg);
+			if (cpumask_test_cpu(busiest_rq->cpu, mask)) {
+				env.src_sg = tmp_sg;
+				env.src_sg_cap = tmp_sg->sgc->capacity;
+				for_each_cpu(i, mask) {
+					env.src_sg_util += cpu_util_cfs(i);
+				}
+			}
+			tmp_sg = tmp_sg->next;
+		} while (local_sg != tmp_sg);
+#endif
 		p = detach_one_task(&env);
 		if (p) {
 			schedstat_inc(sd->alb_pushed);
