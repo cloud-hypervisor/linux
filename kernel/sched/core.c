@@ -4544,6 +4544,10 @@ static int sysctl_schedstats(const struct ctl_table *table, int write, void *buf
 #endif /* CONFIG_PROC_SYSCTL */
 #endif /* CONFIG_SCHEDSTATS */
 
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+unsigned int sysctl_topo_aware_scheduling = 0;
+#endif
+
 #ifdef CONFIG_SYSCTL
 static const struct ctl_table sched_core_sysctls[] = {
 #ifdef CONFIG_SCHEDSTATS
@@ -4591,6 +4595,17 @@ static const struct ctl_table sched_core_sysctls[] = {
 		.extra2		= SYSCTL_FOUR,
 	},
 #endif /* CONFIG_NUMA_BALANCING */
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	{
+		.procname	= "topo_aware_scheduling",
+		.data		= &sysctl_topo_aware_scheduling,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+		.extra2		= SYSCTL_ONE_HUNDRED,
+	},
+#endif
 };
 static int __init sched_core_sysctl_init(void)
 {

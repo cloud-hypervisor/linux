@@ -991,6 +991,13 @@ config NUMA_BALANCING_DEFAULT_ENABLED
 	  If set, automatic NUMA balancing will be enabled if running on a NUMA
 	  machine.
 
+config TOPO_AWARE_SCHEDULING
+	bool "Topology aware affinity scheduling"
+	depends on SMP && NUMA && MIGRATION && !PREEMPT_RT
+	help
+	  This option try to aggregate tasks to its preferred topology node hierarchy
+          starts from LLC to improve performance of memory access latency-sensitive process.
+
 config SLAB_OBJ_EXT
 	bool
 
