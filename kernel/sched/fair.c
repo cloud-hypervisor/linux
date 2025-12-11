@@ -130,6 +130,10 @@ static unsigned int sysctl_sched_cfs_bandwidth_slice		= 5000UL;
 static unsigned int sysctl_numa_balancing_promote_rate_limit = 65536;
 #endif
 
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+unsigned int sysctl_topo_aware_sched_load_ratio = 30;
+#endif
+
 #ifdef CONFIG_SYSCTL
 static const struct ctl_table sched_fair_sysctls[] = {
 #ifdef CONFIG_CFS_BANDWIDTH
@@ -152,6 +156,16 @@ static const struct ctl_table sched_fair_sysctls[] = {
 		.extra1		= SYSCTL_ZERO,
 	},
 #endif /* CONFIG_NUMA_BALANCING */
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	{
+		.procname	= "topo_aware_sched_load_ratio",
+		.data		= &sysctl_topo_aware_sched_load_ratio,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ZERO,
+	},
+#endif
 };
 
 static int __init sched_fair_sysctl_init(void)
@@ -3659,6 +3673,16 @@ static inline void update_scan_period(struct task_struct *p, int new_cpu)
 }
 
 #endif /* !CONFIG_NUMA_BALANCING */
+
+static bool is_node_overload(unsigned long util, unsigned long cap)
+{
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	int ratio = sysctl_topo_aware_sched_load_ratio;
+
+	return util * 100 > cap * ratio;
+#endif
+	return false;
+}
 
 static void
 account_entity_enqueue(struct cfs_rq *cfs_rq, struct sched_entity *se)
