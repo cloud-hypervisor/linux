@@ -2199,6 +2199,10 @@ assign:
 	env->best_cpu = env->dst_cpu;
 }
 
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+static bool is_node_overload(unsigned long util, unsigned long cap);
+#endif
+
 static bool load_too_imbalanced(long src_load, long dst_load,
 				struct task_numa_env *env)
 {
@@ -2216,6 +2220,10 @@ static bool load_too_imbalanced(long src_load, long dst_load,
 	src_capacity = env->src_stats.compute_capacity;
 	dst_capacity = env->dst_stats.compute_capacity;
 
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	if (sysctl_topo_aware_scheduling && !is_node_overload(env->dst_stats.util, dst_capacity))
+		return false;
+#endif
 	imb = abs(dst_load * src_capacity - src_load * dst_capacity);
 
 	orig_src_load = env->src_stats.load;
@@ -2456,7 +2464,9 @@ static void task_numa_find_cpu(struct task_numa_env *env,
 						  env->imb_numa_nr);
 
 		/* Use idle CPU if there is no imbalance */
-		if (!imbalance) {
+		if (!imbalance || (sysctl_topo_aware_scheduling &&
+				!is_node_overload(env->dst_stats.util,
+					env->dst_stats.compute_capacity))) {
 			maymove = true;
 			if (env->dst_stats.idle_cpu >= 0) {
 				env->dst_cpu = env->dst_stats.idle_cpu;
@@ -2555,7 +2565,9 @@ static int task_numa_migrate(struct task_struct *p)
 	 *   we need to check other locations.
 	 */
 	ng = deref_curr_numa_group(p);
-	if (env.best_cpu == -1 || (ng && ng->active_nodes > 1)) {
+	if (env.best_cpu == -1 || (!sysctl_topo_aware_scheduling && ng && ng->active_nodes > 1)
+			|| (sysctl_topo_aware_scheduling && is_node_overload(env.dst_stats.util,
+				env.dst_stats.compute_capacity))) {
 		for_each_node_state(nid, N_CPU) {
 			if (nid == env.src_nid || nid == p->numa_preferred_nid)
 				continue;
