@@ -7390,12 +7390,78 @@ wake_affine_weight(struct sched_domain *sd, struct task_struct *p,
 	return this_eff_load < prev_eff_load ? this_cpu : nr_cpumask_bits;
 }
 
+static int wake_affine_prefer(struct task_struct *p, int this_cpu, int prev_cpu, int sync)
+{
+	int target = nr_cpumask_bits;
+#ifdef CONFIG_TOPO_AWARE_SCHEDULING
+	struct sched_domain_shared *sd_share;
+	int pnuma, cnuma, this_numa, prev_numa, nr;
+	long cur_rss, p_rss;
+	static unsigned long last_time = 0;
+
+	if (!sysctl_topo_aware_scheduling || !sync)
+		return target;
+
+	pnuma = p->numa_preferred_nid;
+	if (pnuma != NUMA_NO_NODE) {
+		/*
+		 * If waker wake up a wakee with WF_SYNC flag, they should ideally share
+		 * the same preferred NUMA node.
+		 * Select the preferred NUMA node based on which one has a higher RSS.
+		 */
+		cnuma = current->numa_preferred_nid;
+		if (current->mm && cnuma != NUMA_NO_NODE && cnuma != pnuma) {
+			cur_rss = get_mm_rss(current->mm);
+			p_rss = get_mm_rss(p->mm);
+			if (cur_rss > p_rss * 2) {
+				p->numa_preferred_nid = cnuma;
+				pnuma = cnuma;
+			} else if (p_rss > cur_rss * 2) {
+				current->numa_preferred_nid = pnuma;
+			}
+		}
+
+		this_numa = cpu_to_node(this_cpu);
+		prev_numa = cpu_to_node(prev_cpu);
+		if (this_numa != prev_numa) {
+			/*
+			 * Choose the target between this_cpu and prev_cpu based on which
+			 * locates wakee's preferred numa.
+			 */
+			if (cpu_to_node(this_cpu) == pnuma)
+				target = this_cpu;
+			else if (cpu_to_node(prev_cpu) == pnuma)
+				target = prev_cpu;
+			/*
+			 * To prevent over-consolidation of threads on the preferred NUMA
+			 * node, check if the target's LLC is overloaded. Limit this check
+			 * to once per tick to minimize overhead.
+			 */
+			if (target != nr_cpumask_bits && jiffies > last_time) {
+				rcu_read_lock();
+				sd_share = rcu_dereference(per_cpu(sd_llc_shared, target));
+				if (sd_share) {
+					nr = READ_ONCE(sd_share->nr_idle_scan);
+				}
+				rcu_read_unlock();
+				last_time = jiffies;
+				if (nr == 0)
+					return nr_cpumask_bits;
+			}
+		}
+	}
+#endif
+	return target;
+}
+
 static int wake_affine(struct sched_domain *sd, struct task_struct *p,
 		       int this_cpu, int prev_cpu, int sync)
 {
 	int target = nr_cpumask_bits;
 
-	if (sched_feat(WA_IDLE))
+	target = wake_affine_prefer(p, this_cpu, prev_cpu, sync);
+
+	if (sched_feat(WA_IDLE) && target == nr_cpumask_bits)
 		target = wake_affine_idle(this_cpu, prev_cpu, sync);
 
 	if (sched_feat(WA_WEIGHT) && target == nr_cpumask_bits)
