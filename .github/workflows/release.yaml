@@ -1,10 +1,10 @@
-name: Cloud Hypervisor Linux Release
-on: [create]
+name: Cloud Hypervisor Linux Build and Release
+on: [create, pull_request]
 
 jobs:
   release:
-    if: github.event_name == 'create' && github.event.ref_type == 'tag'
-    name: Release
+    if: github.event_name == 'pull_request' || (github.event_name == 'create' && github.event.ref_type == 'tag')
+    name: ${{ github.event_name == 'pull_request' && 'Build test' || 'Release' }}
     runs-on: ubuntu-22.04
     steps:
      - name: Code checkout
@@ -26,6 +26,7 @@ jobs:
      - name: Build kernel (x86-64)
        run: CFLAGS="-Wa,-mx86-used-note=no" make bzImage -j `nproc`
      - name: Create release
+       if: github.event_name == 'create'
        id: create_release
        uses: actions/create-release@v1
        env:
@@ -35,6 +36,7 @@ jobs:
          release_name: ${{ github.ref }}
          draft: true
      - name: Upload bzImage for x86_64
+       if: github.event_name == 'create'
        uses: actions/upload-release-asset@v1
        env:
          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -44,6 +46,7 @@ jobs:
          asset_name: bzImage-x86_64
          asset_content_type: application/octet-stream
      - name: Upload vmlinux for x86_64
+       if: github.event_name == 'create'
        uses: actions/upload-release-asset@v1
        env:
          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -53,6 +56,7 @@ jobs:
          asset_name: vmlinux-x86_64
          asset_content_type: application/octet-stream
      - name: Upload Image.gz for aarch64
+       if: github.event_name == 'create'
        uses: actions/upload-release-asset@v1
        env:
          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -62,6 +66,7 @@ jobs:
          asset_name: Image-arm64.gz
          asset_content_type: application/octet-stream
      - name: Upload Image for aarch64
+       if: github.event_name == 'create'
        uses: actions/upload-release-asset@v1
        env:
          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,6 +76,7 @@ jobs:
          asset_name: Image-arm64
          asset_content_type: application/octet-stream
      - name: Upload Image.gz for riscv64
+       if: github.event_name == 'create'
        uses: actions/upload-release-asset@v1
        env:
          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -80,6 +86,7 @@ jobs:
          asset_name: Image-riscv.gz
          asset_content_type: application/octet-stream
      - name: Upload Image for riscv64
+       if: github.event_name == 'create'
        uses: actions/upload-release-asset@v1
        env:
          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
